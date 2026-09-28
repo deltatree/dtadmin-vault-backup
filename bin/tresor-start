@@ -14,4 +14,5 @@ cat > /etc/crontabs/root <<CRON
 15 3 * * * /usr/local/bin/tresor-backup daily >> /proc/1/fd/1 2>&1
 * * * * * [ -f $data/backups/JETZT ] && rm -f $data/backups/JETZT && /usr/local/bin/tresor-backup manual >> /proc/1/fd/1 2>&1
 CRON
-exec crond -f -l 8 -L /dev/stdout
+# Stufe 9: keine Zeile je Minute; Ergebnisse der Sicherung schreibt tresor-backup selbst ins Log.
+exec crond -f -l 9 -L /dev/stdout
