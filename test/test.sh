@@ -9,8 +9,10 @@ fi
 fehler=0
 ok() { echo "OK   $*"; }
 nein() { echo "FEHL $*"; fehler=$((fehler + 1)); }
-arbeit=$(mktemp -d); trap 'rm -rf "$arbeit"' EXIT
-neu() { rm -rf "$arbeit/data"; mkdir -p "$arbeit/data"; cp -a "$quelle"/. "$arbeit/data/"; rm -rf "$arbeit/data/backups"
+arbeit=$(mktemp -d); trap 'docker run --rm -v "$arbeit:/w" --entrypoint sh "$img" -c "rm -rf /w/*" >/dev/null 2>&1; rm -rf "$arbeit"' EXIT
+# Unter Linux gehören Dateien aus dem Container root; aufräumen deshalb im Container.
+weg() { docker run --rm -v "$arbeit:/w" --entrypoint sh "$img" -c "rm -rf /w/$1"; }
+neu() { weg data; mkdir -p "$arbeit/data"; cp -a "$quelle"/. "$arbeit/data/"; weg data/backups
   docker run --rm -v "$arbeit/data:/data" --entrypoint sh "$img" -c "sqlite3 /data/db.sqlite3 'CREATE TABLE IF NOT EXISTS probe(x); DELETE FROM probe; INSERT INTO probe VALUES (1),(2),(3);'" >/dev/null; }
 lauf() { docker run --rm -e HOSTNAME=testpod -v "$arbeit/data:/data" --entrypoint sh "$img" -c "$1" 2>&1; }
 
@@ -57,7 +59,7 @@ docker run -d --name vb-starttest -e HOSTNAME=testpod -v "$arbeit/data:/data" "$
 [ -f "$arbeit/data/backups/.start-testpod" ] && grep -q "^ok " "$arbeit/data/backups/.start-testpod" && ok "Start-Sicherung und Marke" || nein "Start-Marke fehlt"
 ls "$arbeit"/data/backups/tresor-start-* >/dev/null 2>&1 && ok "Start-Sicherung liegt vor" || nein "keine Start-Sicherung"
 
-rm -rf "$arbeit/data"; mkdir -p "$arbeit/data"
+weg data; mkdir -p "$arbeit/data"
 out=$(lauf "tresor-start & sleep 3; cat /data/backups/.start-testpod")
 echo "$out" | grep -q "^ok " && ok "erster Start ohne Datenbank setzt Marke" || nein "erster Start: $out"
 

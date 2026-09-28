@@ -1,14 +1,15 @@
 #!/bin/sh
 # Einstieg des Containers backup: Wiederherstellung, Start-Sicherung, Marke, dann crond.
 set -u
+pod="${HOSTNAME:-$(hostname)}"
 data="${DATA_DIR:-/data}"
 log() { echo "tresor-start: $*"; }
 mkdir -p "$data/backups"
 rm -f "$data"/backups/.start-*
 tresor-restore || log "Wiederherstellung abgelehnt, siehe oben"
 if tresor-backup start; then ergebnis=ok; else ergebnis="fehler-$?"; fi
-echo "$ergebnis $(date -Iseconds)" > "$data/backups/.start-${HOSTNAME:-pod}"
-log "Start-Sicherung: $ergebnis; Marke .start-${HOSTNAME:-pod} gesetzt"
+echo "$ergebnis $(date -Iseconds)" > "$data/backups/.start-$pod"
+log "Start-Sicherung: $ergebnis; Marke .start-$pod gesetzt"
 cat > /etc/crontabs/root <<CRON
 15 3 * * * /usr/local/bin/tresor-backup daily >> /proc/1/fd/1 2>&1
 * * * * * [ -f $data/backups/JETZT ] && rm -f $data/backups/JETZT && /usr/local/bin/tresor-backup manual >> /proc/1/fd/1 2>&1
