@@ -6,7 +6,8 @@ archiv="$data/restore.tar.gz"
 log() { echo "tresor-restore: $*"; }
 [ -f "$archiv" ] || exit 0
 zeit=$(date +%Y%m%d-%H%M%S)
-if tar -tzf "$archiv" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+# busybox-tar entfernt führende "/" und "../" still und warnt nur; auch diese Warnung führt zur Ablehnung.
+if tar -tzf "$archiv" 2>&1 | grep -Eq '(^/|(^|/)\.\.(/|$)|removing leading)'; then
   log "ABGEBROCHEN: Archiv enthält absolute Pfade oder ..; nichts geändert"
   mv "$archiv" "$data/restore.abgelehnt-$zeit.tar.gz"
   exit 1

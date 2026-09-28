@@ -49,10 +49,23 @@ nachher=$(lauf "sqlite3 /data/db.sqlite3 'SELECT count(*) FROM probe;'")
 [ "$vorher" = 0 ] && [ "$nachher" = 3 ] && ok "Wiederherstellung: $vorher -> $nachher Zeilen" || nein "Wiederherstellung: $vorher -> $nachher ($out)"
 ls -d "$arbeit"/data/backups/vor-wiederherstellung-* >/dev/null 2>&1 && ok "alter Stand aufbewahrt" || nein "alter Stand fehlt"
 
-neu; printf 'x' > "$arbeit/boese"; tar -czf "$arbeit/data/restore.tar.gz" -C / etc/hostname 2>/dev/null
-( cd "$arbeit" && tar -czf data/restore.tar.gz ../"$(basename "$arbeit")"/boese 2>/dev/null )
+neu
+# Ein Archiv mit gültiger Datenbank UND einem Pfad mit ..: nur die Pfadprüfung darf es ablehnen.
+python3 - "$arbeit/data" <<'PY2'
+import sys, tarfile, io
+d = sys.argv[1]
+with tarfile.open(d + "/restore.tar.gz", "w:gz") as t:
+    t.add(d + "/db.sqlite3", arcname="db.sqlite3")
+    daten = b"x"
+    info = tarfile.TarInfo("../boese"); info.size = len(daten)
+    t.addfile(info, io.BytesIO(daten))
+PY2
 out=$(lauf "tresor-restore")
-echo "$out" | grep -q "ABGEBROCHEN" && ok "Archiv mit .. abgelehnt" || nein "Archiv mit ..: $out"
+echo "$out" | grep -q "absolute Pfade oder \.\." && ok "Archiv mit .. abgelehnt (Pfadprüfung)" || nein "Archiv mit ..: $out"
+neu
+echo "age-encryption.org/v1 kein tar" > "$arbeit/data/restore.tar.gz"
+out=$(lauf "tresor-restore")
+echo "$out" | grep -q "ABGEBROCHEN" && [ -f "$arbeit/data/db.sqlite3" ] && ok "verschlüsseltes Archiv abgelehnt, Datenbank bleibt" || nein "age-Archiv als restore: $out"
 
 neu
 docker run -d --name vb-starttest -e HOSTNAME=testpod -v "$arbeit/data:/data" "$img" >/dev/null; sleep 6; docker rm -f vb-starttest >/dev/null
