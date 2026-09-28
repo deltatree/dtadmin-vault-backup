@@ -1,0 +1,69 @@
+#!/bin/sh
+# Eine Sicherung des Tresors. Aufruf: tresor-backup daily|start|manual
+# Schreibt nach $DATA_DIR/backups. Gibt 0 zurück, wenn die Sicherung geprüft vorliegt.
+set -u
+art="${1:-manual}"
+data="${DATA_DIR:-/data}"
+ziel="$data/backups"
+log() { echo "tresor-backup: $*"; }
+
+db="$data/db.sqlite3"
+if [ ! -f "$db" ]; then
+  log "keine Datenbank unter $db, nichts zu sichern ($art)"
+  return 0 2>/dev/null || exit 0
+fi
+mkdir -p "$ziel"
+zeit=$(date +%Y%m%d-%H%M%S)
+if [ "$art" = daily ] && [ "$(date +%u)" = 7 ]; then art=weekly; fi
+
+# Platz prüfen: das Doppelte der Nutzdaten muss frei sein.
+bedarf_kb=$(du -sk "$db" "$data/attachments" "$data/sends" 2>/dev/null | awk '{s+=$1} END {print s+0}')
+frei_kb=$(df -Pk "$data" | awk 'NR==2 {print $4}')
+if [ "$frei_kb" -lt $((bedarf_kb * 2)) ]; then
+  log "ÜBERSPRUNGEN ($art): zu wenig Platz, frei ${frei_kb} KiB, nötig $((bedarf_kb * 2)) KiB"
+  exit 3
+fi
+
+tmp="$ziel/.tmp-$zeit-$$"
+mkdir -p "$tmp"
+trap 'rm -rf "$tmp"' EXIT
+if ! sqlite3 "$db" ".backup '$tmp/db.sqlite3'"; then
+  log "FEHLER ($art): sqlite3 .backup gescheitert"
+  exit 4
+fi
+pruefung=$(sqlite3 "$tmp/db.sqlite3" "PRAGMA integrity_check;" 2>&1 | head -1)
+if [ "$pruefung" != ok ]; then
+  log "FEHLER ($art): integrity_check meldet: $pruefung"
+  exit 5
+fi
+for d in attachments sends; do
+  [ -d "$data/$d" ] && cp -a "$data/$d" "$tmp/$d"
+done
+
+empfaenger="${BACKUP_AGE_RECIPIENT:-}"
+if [ -n "$empfaenger" ]; then
+  for f in "$data"/rsa_key* "$data/config.json"; do
+    [ -f "$f" ] && cp -a "$f" "$tmp/"
+  done
+  datei="$ziel/tresor-$art-$zeit.tar.gz.age"
+  if ! tar -czf - -C "$tmp" . | age -r "$empfaenger" -o "$datei.teil"; then
+    log "FEHLER ($art): Verschlüsseln mit age gescheitert"
+    rm -f "$datei.teil"
+    exit 6
+  fi
+else
+  datei="$ziel/tresor-$art-$zeit.tar.gz"
+  tar -czf "$datei.teil" -C "$tmp" . || { log "FEHLER ($art): tar gescheitert"; rm -f "$datei.teil"; exit 6; }
+  log "HINWEIS: ohne BACKUP_AGE_RECIPIENT unverschlüsselt; rsa_key* und config.json fehlen deshalb"
+fi
+mv "$datei.teil" "$datei"
+log "OK ($art): $(basename "$datei"), $(du -k "$datei" | awk '{print $1}') KiB, integrity_check=ok"
+
+aufraeumen() { # Muster, Anzahl
+  ls -1t "$ziel"/tresor-"$1"-* 2>/dev/null | tail -n +$(($2 + 1)) | while read -r alt; do rm -f "$alt"; log "entfernt: $(basename "$alt")"; done
+}
+aufraeumen daily 14
+aufraeumen weekly 8
+aufraeumen start 5
+aufraeumen manual 5
+exit 0

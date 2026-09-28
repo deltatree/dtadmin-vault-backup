@@ -1,0 +1,35 @@
+#!/bin/sh
+# Spielt $DATA_DIR/restore.tar.gz ein, bevor Vaultwarden startet. Der alte Stand bleibt erhalten.
+set -u
+data="${DATA_DIR:-/data}"
+archiv="$data/restore.tar.gz"
+log() { echo "tresor-restore: $*"; }
+[ -f "$archiv" ] || exit 0
+zeit=$(date +%Y%m%d-%H%M%S)
+if tar -tzf "$archiv" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+  log "ABGEBROCHEN: Archiv enthält absolute Pfade oder ..; nichts geändert"
+  mv "$archiv" "$data/restore.abgelehnt-$zeit.tar.gz"
+  exit 1
+fi
+neu="$data/.restore-$zeit"
+mkdir -p "$neu"
+if ! tar -xzf "$archiv" -C "$neu" || [ ! -f "$neu/db.sqlite3" ]; then
+  log "ABGEBROCHEN: Archiv unlesbar oder ohne db.sqlite3; nichts geändert"
+  rm -rf "$neu"; mv "$archiv" "$data/restore.abgelehnt-$zeit.tar.gz"
+  exit 1
+fi
+pruefung=$(sqlite3 "$neu/db.sqlite3" "PRAGMA integrity_check;" 2>&1 | head -1)
+if [ "$pruefung" != ok ]; then
+  log "ABGEBROCHEN: integrity_check der Sicherung meldet: $pruefung; nichts geändert"
+  rm -rf "$neu"; mv "$archiv" "$data/restore.abgelehnt-$zeit.tar.gz"
+  exit 1
+fi
+alt="$data/backups/vor-wiederherstellung-$zeit"
+mkdir -p "$alt"
+for f in "$data"/db.sqlite3 "$data"/db.sqlite3-wal "$data"/db.sqlite3-shm "$data"/rsa_key* "$data/config.json" "$data/attachments" "$data/sends"; do
+  [ -e "$f" ] && mv "$f" "$alt/"
+done
+for f in "$neu"/* ; do mv "$f" "$data/"; done
+rm -rf "$neu"
+mv "$archiv" "$data/backups/eingespielt-$zeit.tar.gz"
+log "OK: Sicherung eingespielt; alter Stand liegt in backups/vor-wiederherstellung-$zeit"
